@@ -236,7 +236,7 @@ Modern software like Settle3 integrates these methods with CPT data for comprehe
         # Save documents to files
         for doc in documents:
             file_path = self.data_dir / doc["filename"]
-            with open(file_path, 'w') as f:
+            with open(file_path, 'w', encoding='utf-8') as f:
                 f.write(doc["content"])
     
     def _build_index(self):

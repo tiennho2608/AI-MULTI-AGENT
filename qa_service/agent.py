@@ -1,135 +1,242 @@
-import math
-from typing import Dict, Any, Optional
+import re
+import json
+import time
+from typing import Dict, Any, List, Optional, Tuple
 import logging
+import ollama
+from .knowledge_base import KnowledgeBase
+from .tools import SettlementCalculator, TerzaghiBearingCapacity
 
 logger = logging.getLogger(__name__)
 
-class SettlementCalculator:
-    """Tool for immediate settlement calculation: settlement = load / Young's modulus"""
-    
-    @staticmethod
-    def calculate(load: float, youngs_modulus: float) -> Dict[str, Any]:
-        """
-        Calculate immediate settlement
-        Args:
-            load: Applied load (kN/m² or similar units)
-            youngs_modulus: Young's modulus of soil (kN/m² or similar units)
-        Returns:
-            Dict with settlement value and metadata
-        """
-        try:
-            if youngs_modulus <= 0:
-                raise ValueError("Young's modulus must be positive")
-            if load < 0:
-                raise ValueError("Load cannot be negative")
-            
-            settlement = load / youngs_modulus
-            
-            return {
-                "settlement": settlement,
-                "units": "same as load units / modulus units",
-                "formula": "settlement = load / Young's_modulus",
-                "inputs": {
-                    "load": load,
-                    "youngs_modulus": youngs_modulus
-                }
-            }
-        except Exception as e:
-            logger.error(f"Settlement calculation error: {str(e)}")
-            raise
+class TechnicalAgent:
+    def __init__(self):
+        self.kb = KnowledgeBase()
+        self.settlement_calc = SettlementCalculator()
+        self.bearing_capacity = TerzaghiBearingCapacity()
+        self.ollama_model = "llama3"  # Specify the Ollama model to use
 
-class TerzaghiBearingCapacity:
-    """Tool for Terzaghi bearing capacity analysis (cohesionless soils)"""
-    
-    # Bearing capacity factors lookup table
-    BEARING_CAPACITY_FACTORS = {
-        0: {"Nq": 1.0, "Nr": 0.0},
-        5: {"Nq": 1.6, "Nr": 0.1},
-        10: {"Nq": 2.5, "Nr": 0.4},
-        15: {"Nq": 3.9, "Nr": 1.2},
-        20: {"Nq": 6.4, "Nr": 2.9},
-        25: {"Nq": 10.7, "Nr": 6.8},
-        30: {"Nq": 18.4, "Nr": 15.1},
-        32: {"Nq": 23.2, "Nr": 20.8},
-        34: {"Nq": 29.4, "Nr": 28.8},
-        35: {"Nq": 33.3, "Nr": 33.9},
-        36: {"Nq": 37.8, "Nr": 40.1},
-        38: {"Nq": 48.9, "Nr": 56.3},
-        40: {"Nq": 64.2, "Nr": 79.5},
-        42: {"Nq": 85.4, "Nr": 113.0},
-        45: {"Nq": 134.9, "Nr": 200.8}
-    }
-    
-    @staticmethod
-    def _interpolate_factors(friction_angle: float) -> Dict[str, float]:
-        """Interpolate bearing capacity factors for given friction angle"""
-        angles = sorted(TerzaghiBearingCapacity.BEARING_CAPACITY_FACTORS.keys())
+    def _should_use_settlement_tool(self, question: str) -> bool:
+        """Determine if settlement calculation tool should be used"""
+        settlement_keywords = [
+            "settlement", "immediate settlement", "elastic settlement",
+            "load", "young", "modulus", "settlement = load",
+            "calculate settlement", "settlement calculation"
+        ]
+        question_lower = question.lower()
+        return any(keyword in question_lower for keyword in settlement_keywords)
+
+    def _should_use_bearing_capacity_tool(self, question: str) -> bool:
+        """Determine if bearing capacity tool should be used"""
+        bearing_keywords = [
+            "bearing capacity", "ultimate bearing", "terzaghi", "qu", "q_ult",
+            "bearing", "footing", "foundation capacity", "nq", "nr", "friction angle"
+        ]
+        question_lower = question.lower()
+        return any(keyword in question_lower for keyword in bearing_keywords)
+
+    def _extract_settlement_params(self, question: str, context: str = "") -> Optional[Tuple[float, float]]:
+        """Extract load and Young's modulus from question"""
+        text = f"{question} {context}".lower()
         
-        if friction_angle <= angles[0]:
-            return TerzaghiBearingCapacity.BEARING_CAPACITY_FACTORS[angles[0]]
-        elif friction_angle >= angles[-1]:
-            return TerzaghiBearingCapacity.BEARING_CAPACITY_FACTORS[angles[-1]]
+        # Look for patterns like "load = 100", "youngs modulus = 25000", etc.
+        load_match = re.search(r'load[s]?\s*[=:]\s*([0-9.]+)', text)
+        modulus_patterns = [
+            r'young[\'s\s]*modulus[s]?\s*[=:]\s*([0-9.]+)',
+            r'modulus[s]?\s*[=:]\s*([0-9.]+)',
+            r'e\s*[=:]\s*([0-9.]+)'
+        ]
         
-        # Linear interpolation
-        for i in range(len(angles) - 1):
-            if angles[i] <= friction_angle <= angles[i + 1]:
-                lower = TerzaghiBearingCapacity.BEARING_CAPACITY_FACTORS[angles[i]]
-                upper = TerzaghiBearingCapacity.BEARING_CAPACITY_FACTORS[angles[i + 1]]
-                
-                ratio = (friction_angle - angles[i]) / (angles[i + 1] - angles[i])
-                
-                return {
-                    "Nq": lower["Nq"] + ratio * (upper["Nq"] - lower["Nq"]),
-                    "Nr": lower["Nr"] + ratio * (upper["Nr"] - lower["Nr"])
-                }
-    
-    @staticmethod
-    def calculate(B: float, gamma: float, Df: float, friction_angle: float) -> Dict[str, Any]:
-        """
-        Calculate ultimate bearing capacity using Terzaghi's equation
-        Args:
-            B: Diameter/width of footing (m)
-            gamma: Unit weight of soil (kN/m³)
-            Df: Depth of footing (m)
-            friction_angle: Friction angle in degrees
-        Returns:
-            Dict with bearing capacity and calculation details
-        """
+        load = None
+        modulus = None
+        
+        if load_match:
+            load = float(load_match.group(1))
+        
+        for pattern in modulus_patterns:
+            modulus_match = re.search(pattern, text)
+            if modulus_match:
+                modulus = float(modulus_match.group(1))
+                break
+        
+        if load is not None and modulus is not None:
+            return (load, modulus)
+        return None
+
+    def _extract_bearing_capacity_params(self, question: str, context: str = "") -> Optional[Dict[str, float]]:
+        """Extract bearing capacity parameters from question"""
+        text = f"{question} {context}".lower()
+        
+        params = {}
+        
+        # Extract parameters using regex patterns
+        patterns = {
+            'B': r'b\s*[=:]\s*([0-9.]+)',
+            'gamma': r'gamma\s*[=:]\s*([0-9.]+)',
+            'Df': r'df\s*[=:]\s*([0-9.]+)',
+            'friction_angle': r'friction[_\s]*angle\s*[=:]\s*([0-9.]+)'
+        }
+        
+        for param, pattern in patterns.items():
+            match = re.search(pattern, text)
+            if match:
+                params[param] = float(match.group(1))
+        
+        # Check if we have all required parameters
+        if len(params) == 4:
+            return params
+        return None
+
+    def _call_ollama(self, prompt: str) -> str:
+        """Call Ollama to generate a response"""
         try:
-            if any(x <= 0 for x in [B, gamma, Df]):
-                raise ValueError("B, gamma, and Df must be positive")
-            if not 0 <= friction_angle <= 45:
-                raise ValueError("Friction angle must be between 0 and 45 degrees")
+            response = ollama.generate(model=self.ollama_model, prompt=prompt)
+            return response['response'].strip()
+        except Exception as e:
+            logger.error(f"Ollama call failed: {str(e)}")
+            return f"Error calling Ollama: {str(e)}"
+
+    def process_question(self, question: str, context: str = "") -> Dict[str, Any]:
+        """Main agent logic to process questions"""
+        trace_steps = []
+        start_time = time.time()
+        
+        try:
+            # Step 1: Decide what to do
+            use_settlement = self._should_use_settlement_tool(question)
+            use_bearing = self._should_use_bearing_capacity_tool(question)
+            use_retrieval = True  # Always try retrieval for context
             
-            factors = TerzaghiBearingCapacity._interpolate_factors(friction_angle)
-            Nq = factors["Nq"]
-            Nr = factors["Nr"]
+            citations = []
+            answer_parts = []
+            tools_used = []
             
-            # Terzaghi equation: q_ult = γ*Df*Nq + 0.5*γ*B*Nr
-            term1 = gamma * Df * Nq
-            term2 = 0.5 * gamma * B * Nr
-            q_ult = term1 + term2
+            # Step 2: Retrieval
+            if use_retrieval:
+                retrieval_start = time.time()
+                search_results = self.kb.search(question, k=3)
+                retrieval_time = (time.time() - retrieval_start) * 1000
+                
+                trace_steps.append({
+                    "step": "retrieval",
+                    "duration_ms": round(retrieval_time, 2),
+                    "results_count": len(search_results),
+                    "top_score": search_results[0]['score'] if search_results else 0
+                })
+                
+                if search_results:
+                    citations = [
+                        {
+                            "source": result['filename'],
+                            "title": result['title'],
+                            "score": result['score']
+                        }
+                        for result in search_results[:2]  # Top 2 results
+                    ]
+            
+            # Step 3: Tool usage
+            if use_settlement:
+                tool_start = time.time()
+                params = self._extract_settlement_params(question, context)
+                if params:
+                    load, modulus = params
+                    try:
+                        result = self.settlement_calc.calculate(load, modulus)
+                        tools_used.append("settlement_calculator")
+                        answer_parts.append(
+                            f"Settlement calculation: {result['settlement']:.4f} {result['units']}. "
+                            f"Formula used: {result['formula']}"
+                        )
+                        
+                        tool_time = (time.time() - tool_start) * 1000
+                        trace_steps.append({
+                            "step": "settlement_tool",
+                            "duration_ms": round(tool_time, 2),
+                            "inputs": result['inputs'],
+                            "result": result['settlement']
+                        })
+                    except Exception as e:
+                        answer_parts.append(f"Error in settlement calculation: {str(e)}")
+                else:
+                    answer_parts.append(
+                        "To calculate settlement, please provide both load and Young's modulus values. "
+                        "Format: 'Calculate settlement for load = X and Young's modulus = Y'"
+                    )
+            
+            if use_bearing:
+                tool_start = time.time()
+                params = self._extract_bearing_capacity_params(question, context)
+                if params:
+                    try:
+                        result = self.bearing_capacity.calculate(**params)
+                        tools_used.append("bearing_capacity_calculator")
+                        answer_parts.append(
+                            f"Ultimate bearing capacity: {result['ultimate_bearing_capacity']:.2f} {result['units']}. "
+                            f"Factors used: Nq = {result['factors']['Nq']}, Nr = {result['factors']['Nr']}"
+                        )
+                        
+                        tool_time = (time.time() - tool_start) * 1000
+                        trace_steps.append({
+                            "step": "bearing_capacity_tool",
+                            "duration_ms": round(tool_time, 2),
+                            "inputs": result['inputs'],
+                            "result": result['ultimate_bearing_capacity']
+                        })
+                    except Exception as e:
+                        answer_parts.append(f"Error in bearing capacity calculation: {str(e)}")
+                else:
+                    answer_parts.append(
+                        "To calculate bearing capacity, please provide: B (footing width), "
+                        "gamma (unit weight), Df (footing depth), and friction angle. "
+                        "Format: 'Calculate bearing capacity for B = X, gamma = Y, Df = Z, friction angle = A'"
+                    )
+            
+            # Step 4: Use Ollama for general questions or to enhance answers
+            if not answer_parts or (search_results and not tools_used):
+                tool_start = time.time()
+                ollama_prompt = (
+                    f"Question: {question}\n"
+                    f"Context from knowledge base:\n"
+                    + "\n".join([f"{result['title']}: {result['content'][:300]}" for result in search_results])
+                    + "\n\nProvide a concise and accurate answer based on the context and question."
+                )
+                ollama_response = self._call_ollama(ollama_prompt)
+                answer_parts.append(ollama_response)
+                trace_steps.append({
+                    "step": "ollama_generation",
+                    "duration_ms": round((time.time() - tool_start) * 1000, 2)
+                })
+            
+            # Step 5: Generate final answer
+            if answer_parts:
+                final_answer = " ".join(answer_parts)
+            else:
+                final_answer = "I couldn't find specific information to answer your question. " + \
+                             "Please provide more details or check if your question relates to " + \
+                             "settlement calculations, bearing capacity analysis, or CPT/liquefaction analysis."
+            
+            total_time = (time.time() - start_time) * 1000
+            trace_steps.append({
+                "step": "final_answer_generation",
+                "duration_ms": round(total_time - sum(step.get('duration_ms', 0) for step in trace_steps), 2)
+            })
             
             return {
-                "ultimate_bearing_capacity": q_ult,
-                "units": "kN/m² (assuming gamma in kN/m³)",
-                "formula": "q_ult = γ*Df*Nq + 0.5*γ*B*Nr",
-                "inputs": {
-                    "B": B,
-                    "gamma": gamma,
-                    "Df": Df,
-                    "friction_angle": friction_angle
-                },
-                "factors": {
-                    "Nq": round(Nq, 2),
-                    "Nr": round(Nr, 2)
-                },
-                "calculation_breakdown": {
-                    "depth_term": round(term1, 2),
-                    "width_term": round(term2, 2),
-                    "total": round(q_ult, 2)
-                }
+                "answer": final_answer,
+                "citations": citations,
+                "tools_used": tools_used,
+                "retrieval_used": use_retrieval,
+                "trace": trace_steps,
+                "total_duration_ms": round(total_time, 2)
             }
+            
         except Exception as e:
-            logger.error(f"Bearing capacity calculation error: {str(e)}")
-            raise
+            logger.error(f"Agent processing error: {str(e)}")
+            return {
+                "answer": f"An error occurred while processing your question: {str(e)}",
+                "citations": [],
+                "tools_used": [],
+                "retrieval_used": False,
+                "trace": trace_steps,
+                "total_duration_ms": round((time.time() - start_time) * 1000, 2)
+            }
