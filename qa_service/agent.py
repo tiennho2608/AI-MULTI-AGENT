@@ -14,7 +14,7 @@ class TechnicalAgent:
         self.kb = KnowledgeBase()
         self.settlement_calc = SettlementCalculator()
         self.bearing_capacity = TerzaghiBearingCapacity()
-        self.ollama_model = "llama3"  # Specify the Ollama model to use
+        self.ollama_model = "gemma2:2b"  # Specify the Ollama model to use
 
     def _should_use_settlement_tool(self, question: str) -> bool:
         """Determine if settlement calculation tool should be used"""

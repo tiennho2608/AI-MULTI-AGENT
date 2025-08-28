@@ -12,3 +12,14 @@ INFO 2025-08-27 17:04:16,879 views 10984 9524 Processing question request - trac
 INFO 2025-08-27 17:04:16,920 views 10984 9524 Question processed successfully - trace_id: 3a99add3-f958-4769-932c-bd9b97d05f41, duration: 28.66ms
 INFO 2025-08-27 17:10:23,841 views 10984 18184 Processing question request - trace_id: 6691f551-de6d-4157-a217-697c3562dc7c
 INFO 2025-08-27 17:10:23,881 views 10984 18184 Question processed successfully - trace_id: 6691f551-de6d-4157-a217-697c3562dc7c, duration: 30.30ms
+INFO 2025-08-28 16:33:26,885 views 24060 27180 Processing question request - trace_id: feaf046b-aff0-4828-8dd2-48b9fd2a85d2
+ERROR 2025-08-28 16:33:28,987 agent 24060 27180 Ollama call failed: Failed to connect to Ollama. Please check that Ollama is downloaded, running and accessible. https://ollama.com/download
+INFO 2025-08-28 16:33:29,003 views 24060 27180 Question processed successfully - trace_id: feaf046b-aff0-4828-8dd2-48b9fd2a85d2, duration: 2102.71ms
+INFO 2025-08-28 16:33:51,246 views 24060 28292 Processing question request - trace_id: 79eab6d5-75ac-46e9-901c-76d29b58c147
+ERROR 2025-08-28 16:33:51,275 agent 24060 28292 Ollama call failed: model 'llama3' not found (status code: 404)
+INFO 2025-08-28 16:33:51,287 views 24060 28292 Question processed successfully - trace_id: 79eab6d5-75ac-46e9-901c-76d29b58c147, duration: 29.88ms
+INFO 2025-08-28 16:34:58,604 views 28340 28124 Processing question request - trace_id: 4c96945b-15fe-427a-aed6-9b0b40901d77
+ERROR 2025-08-28 16:34:59,695 agent 28340 28124 Ollama call failed: model requires more system memory (1.9 GiB) than is available (1.7 GiB) (status code: 500)
+INFO 2025-08-28 16:34:59,710 views 28340 28124 Question processed successfully - trace_id: 4c96945b-15fe-427a-aed6-9b0b40901d77, duration: 1092.26ms
+INFO 2025-08-28 16:40:19,063 views 28340 11972 Processing question request - trace_id: 06fca530-5100-4805-9149-c0a4fa52f8e3
+INFO 2025-08-28 16:40:43,392 views 28340 11972 Question processed successfully - trace_id: 06fca530-5100-4805-9149-c0a4fa52f8e3, duration: 24319.29ms
